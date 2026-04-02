@@ -1,60 +1,31 @@
 import { ComprehendClient, DetectPiiEntitiesCommand } from "@aws-sdk/client-comprehend";
 
-/**
- * AWSComprehendPIIRedactor
- * Utilitas untuk mendeteksi dan menyunting data sensitif (PII) menggunakan AWS Comprehend.
- */
-export class AWSComprehendPIIRedactor {
+export class AWSComprehendRedactor {
   private client: ComprehendClient;
 
-  constructor(region: string, accessKeyId: string, secretAccessKey: string) {
-    this.client = new ComprehendClient({
-      region,
-      credentials: {
-        accessKeyId,
-        secretAccessKey,
-      },
-    });
+  constructor(region: string = "us-east-1") {
+    this.client = new ComprehendClient({ region });
   }
 
-  /**
-   * Menyunting teks dengan mengganti entitas PII yang terdeteksi dengan placeholder.
-   */
-  async redact(text: string, languageCode: string = "en"): Promise<string> {
-    const entities = await this.detectPii(text, languageCode);
-    
-    // Kita urutkan entitas dari offset TERBESAR ke terkecil agar index tidak rusak saat editing
-    const sortedEntities = [...entities].sort((a, b) => b.BeginOffset - a.BeginOffset);
+  async redact(text: string): Promise<string> {
+    const command = new DetectPiiEntitiesCommand({
+      Text: text,
+      LanguageCode: "en",
+    });
 
+    const response = await this.client.send(command);
     let redactedText = text;
 
-    for (const entity of sortedEntities) {
-      const placeholder = `[REDACTED_${entity.Type}]`;
-      redactedText =
-        redactedText.slice(0, entity.BeginOffset) +
-        placeholder +
-        redactedText.slice(entity.EndOffset);
+    // Sort entities by BeginOffset in reverse to avoid index shifting
+    const entities = response.Entities?.sort((a, b) => (b.BeginOffset ?? 0) - (a.BeginOffset ?? 0)) || [];
+
+    for (const entity of entities) {
+      const start = entity.BeginOffset ?? 0;
+      const end = entity.EndOffset ?? 0;
+      redactedText = redactedText.slice(0, start) + "[REDACTED]" + redactedText.slice(end);
     }
 
     return redactedText;
-  }
-
-  /**
-   * Memanggil AWS Comprehend untuk mendeteksi entitas PII.
-   */
-  async detectPii(text: string, languageCode: string) {
-    const command = new DetectPiiEntitiesCommand({
-      Text: text,
-      LanguageCode: languageCode,
-    });
-
-    try {
-      const response = await this.client.send(command);
-      return response.Entities || [];
-    } catch (error) {
-      console.error("AWS Comprehend Error:", error);
-      throw error;
-    }
   }
 }
 
